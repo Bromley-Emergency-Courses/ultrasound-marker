@@ -295,6 +295,10 @@ export function initSchema(db: Database.Database): void {
       id                INTEGER PRIMARY KEY CHECK (id = 1),
       orthanc_base_url  TEXT NOT NULL,
       ohif_base_url     TEXT NOT NULL,
+      orthanc_auth_type TEXT NOT NULL DEFAULT 'none',
+      orthanc_auth_token TEXT,
+      orthanc_auth_username TEXT,
+      orthanc_auth_password TEXT,
       configured_at     TEXT NOT NULL
     );
 
@@ -357,6 +361,32 @@ export function initSchema(db: Database.Database): void {
         REFERENCES assessment_stations(profile_id, module_code, station_number) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS conclusion_dicom_links (
+      profile_id            TEXT NOT NULL,
+      student_id            TEXT NOT NULL,
+      student_short_id      TEXT NOT NULL,
+      module_code           TEXT NOT NULL,
+      station_number        INTEGER NOT NULL,
+      patient_id            TEXT NOT NULL,
+      study_instance_uid    TEXT NOT NULL,
+      orthanc_study_id      TEXT NOT NULL,
+      study_description     TEXT,
+      study_date            TEXT,
+      modality              TEXT,
+      series_count          INTEGER NOT NULL DEFAULT 0,
+      instance_count        INTEGER NOT NULL DEFAULT 0,
+      ohif_url              TEXT NOT NULL,
+      linked_at             TEXT NOT NULL,
+      preview_count         INTEGER,
+      preview_error         TEXT,
+      preview_checked_at    TEXT,
+      PRIMARY KEY(profile_id, student_id, module_code, station_number),
+      FOREIGN KEY(profile_id, student_id)
+        REFERENCES profile_students(profile_id, student_id) ON DELETE CASCADE,
+      FOREIGN KEY(profile_id, module_code, station_number)
+        REFERENCES assessment_stations(profile_id, module_code, station_number) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS dicom_unresolved_studies (
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id              INTEGER,
@@ -405,6 +435,54 @@ export function initSchema(db: Database.Database): void {
   } catch {
     // Column already exists — safe to ignore
   }
+
+  try {
+    db.exec(`ALTER TABLE dicom_server_config ADD COLUMN orthanc_auth_type TEXT NOT NULL DEFAULT 'none'`)
+  } catch {
+    // Column already exists — safe to ignore
+  }
+
+  try {
+    db.exec(`ALTER TABLE dicom_server_config ADD COLUMN orthanc_auth_token TEXT`)
+  } catch {
+    // Column already exists — safe to ignore
+  }
+
+  try {
+    db.exec(`ALTER TABLE dicom_server_config ADD COLUMN orthanc_auth_username TEXT`)
+  } catch {
+    // Column already exists — safe to ignore
+  }
+
+  try {
+    db.exec(`ALTER TABLE dicom_server_config ADD COLUMN orthanc_auth_password TEXT`)
+  } catch {
+    // Column already exists — safe to ignore
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conclusion_dicom_links (
+      profile_id            TEXT NOT NULL,
+      student_id            TEXT NOT NULL,
+      student_short_id      TEXT NOT NULL,
+      module_code           TEXT NOT NULL,
+      station_number        INTEGER NOT NULL,
+      patient_id            TEXT NOT NULL,
+      study_instance_uid    TEXT NOT NULL,
+      orthanc_study_id      TEXT NOT NULL,
+      study_description     TEXT,
+      study_date            TEXT,
+      modality              TEXT,
+      series_count          INTEGER NOT NULL DEFAULT 0,
+      instance_count        INTEGER NOT NULL DEFAULT 0,
+      ohif_url              TEXT NOT NULL,
+      linked_at             TEXT NOT NULL,
+      preview_count         INTEGER,
+      preview_error         TEXT,
+      preview_checked_at    TEXT,
+      PRIMARY KEY(profile_id, student_id, module_code, station_number)
+    )
+  `)
 
   seedLegacyProfile(db)
 }

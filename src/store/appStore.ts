@@ -1,7 +1,15 @@
 import { create } from 'zustand'
 import type { ModuleProgress, StationFormField } from '../types/ipc'
 
-export type AppScreen = 'login' | 'setup' | 'dashboard' | 'studentList' | 'marking' | 'resolution' | 'admin'
+export type AppScreen =
+  | 'login'
+  | 'setup'
+  | 'dicomSetup'
+  | 'dashboard'
+  | 'studentList'
+  | 'marking'
+  | 'resolution'
+  | 'admin'
 
 export type ExaminerName = string
 
@@ -40,6 +48,7 @@ interface AppState {
   setScreen: (screen: AppScreen) => void
   openSetupFresh: () => void
   openSetupEdit: () => void
+  openDicomSetup: () => void
   openMarkingPage: (ctx: MarkingContext) => void
   openResolutionPage: (ctx: MarkingContext) => void
   openStudentList: (ctx: MarkingContext) => void
@@ -64,6 +73,7 @@ export const useAppStore = create<AppState>((set) => ({
   setScreen: (screen) => set({ screen }),
   openSetupFresh: () => set({ screen: 'setup', setupIsEdit: false }),
   openSetupEdit: () => set({ screen: 'setup', setupIsEdit: true }),
+  openDicomSetup: () => set({ screen: 'dicomSetup' }),
 
   openMarkingPage: (ctx) =>
     set({ markingContext: ctx, screen: 'marking', skipList: [], selectedStudent: null }),

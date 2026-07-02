@@ -7,6 +7,7 @@ import StudentListPage from './pages/StudentListPage'
 import MarkingPage from './pages/MarkingPage'
 import ResolutionPage from './pages/ResolutionPage'
 import AdminPage from './pages/AdminPage'
+import DicomSetupPage from './pages/DicomSetupPage'
 import UpdateStatus from './components/UpdateStatus'
 
 export default function App(): React.JSX.Element {
@@ -20,6 +21,9 @@ export default function App(): React.JSX.Element {
       break
     case 'setup':
       page = <SetupPage />
+      break
+    case 'dicomSetup':
+      page = <DicomSetupPage />
       break
     case 'dashboard':
       page = <DashboardPage />

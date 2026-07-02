@@ -2,16 +2,24 @@ import React, { useEffect, useState } from 'react'
 import { useAppStore, type ExaminerName } from '../store/appStore'
 
 export default function LoginPage(): React.JSX.Element {
-  const { setExaminer, openSetupEdit, setScreen } = useAppStore()
+  const { setExaminer, openSetupFresh, openSetupEdit, openDicomSetup, setScreen } = useAppStore()
   const [selected, setSelected] = useState<ExaminerName | ''>('')
   const [examiners, setExaminers] = useState<string[]>([])
   const [dbReady, setDbReady] = useState(false)
+  const [setupComplete, setSetupComplete] = useState(false)
+  const [settingsImported, setSettingsImported] = useState(false)
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     async function checkDb(): Promise<void> {
       const result = await window.api.autoLoad()
       setDbReady(result.configured)
+      const [completeFlag, importedFlag] = await Promise.all([
+        window.api.configGet('initial_setup_complete'),
+        window.api.configGet('settings_package_imported')
+      ])
+      setSetupComplete(completeFlag === '1')
+      setSettingsImported(importedFlag === '1')
       const cfg = await window.api.getActiveProfileConfig()
       setExaminers(cfg?.examiners.map((e) => e.name) ?? [])
       setChecking(false)
@@ -28,6 +36,28 @@ export default function LoginPage(): React.JSX.Element {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <p className="text-white text-lg">Loading…</p>
+      </div>
+    )
+  }
+
+  const needsInitialSetup = !dbReady && !setupComplete
+
+  if (needsInitialSetup) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-8 px-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-white mb-2">Ultrasound Assessment Marking Tool</h1>
+          <p className="text-slate-400">Set up this device before marking</p>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm flex flex-col gap-5">
+          <button
+            onClick={settingsImported ? openDicomSetup : openSetupFresh}
+            className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700"
+          >
+            {settingsImported ? 'Continue Setup' : 'Set Up This Device'}
+          </button>
+        </div>
       </div>
     )
   }
@@ -65,7 +95,7 @@ export default function LoginPage(): React.JSX.Element {
           </p>
         )}
 
-        {!dbReady && (
+        {!dbReady && !setupComplete && (
           <p className="text-amber-600 text-sm bg-amber-50 border border-amber-200 rounded-lg p-3">
             First time setup required. Click Edit Setup to configure your folders.
           </p>
