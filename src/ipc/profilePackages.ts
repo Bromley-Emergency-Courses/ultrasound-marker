@@ -50,6 +50,27 @@ interface PackagedReferenceDicomLink {
   preview_checked_at: string | null
 }
 
+interface PackagedConclusionDicomLink {
+  profile_id?: string
+  student_id: string
+  student_short_id: string
+  module_code: string
+  station_number: number
+  patient_id: string
+  study_instance_uid: string
+  orthanc_study_id: string
+  study_description: string | null
+  study_date: string | null
+  modality: string | null
+  series_count: number
+  instance_count: number
+  ohif_url: string
+  linked_at: string
+  preview_count: number | null
+  preview_error: string | null
+  preview_checked_at: string | null
+}
+
 interface DicomLinksPackage {
   format_version: 1
   exported_at: string
@@ -57,6 +78,7 @@ interface DicomLinksPackage {
   ohif_base_url: string | null
   links: PackagedDicomLink[]
   reference_links?: PackagedReferenceDicomLink[]
+  conclusion_links?: PackagedConclusionDicomLink[]
 }
 
 function nowIso(): string {
@@ -112,9 +134,38 @@ export function saveProfileConfig(db: Database.Database, cfg: ProfileConfig): Pr
   const oldStudents = db
     .prepare('SELECT student_id FROM profile_students WHERE profile_id = ?')
     .all(profileId) as { student_id: string }[]
+  const existingReferenceDicomLinks = db
+    .prepare(
+      `SELECT module_code, station_number, slot,
+              patient_id, study_instance_uid, orthanc_study_id,
+              study_description, study_date, modality,
+              series_count, instance_count, ohif_url, linked_at,
+              preview_count, preview_error, preview_checked_at
+       FROM reference_dicom_links
+       WHERE profile_id = ?
+       ORDER BY module_code, station_number, slot`
+    )
+    .all(profileId) as PackagedReferenceDicomLink[]
+  const existingConclusionDicomLinks = db
+    .prepare(
+      `SELECT student_id, student_short_id, module_code, station_number,
+              patient_id, study_instance_uid, orthanc_study_id,
+              study_description, study_date, modality,
+              series_count, instance_count, ohif_url, linked_at,
+              preview_count, preview_error, preview_checked_at
+       FROM conclusion_dicom_links
+       WHERE profile_id = ?
+       ORDER BY module_code, station_number, student_id`
+    )
+    .all(profileId) as PackagedConclusionDicomLink[]
   const targetRoot = (
     db.prepare('SELECT value FROM app_config WHERE key = ?').get('target_root') as { value: string } | undefined
   )?.value
+  const nextStationSet = new Set(
+    cfg.modules.flatMap((mod) =>
+      mod.stations.map((station) => `${cleanCode(mod.code)}:${Number(station.station_number)}`)
+    )
+  )
 
   const tx = db.transaction(() => {
     db.prepare(`
@@ -186,6 +237,53 @@ export function saveProfileConfig(db: Database.Database, cfg: ProfileConfig): Pr
         (profile_id, module_code, source_station_number, target_station_number)
       VALUES (?, ?, ?, ?)
     `)
+    const restoreReferenceDicomLink = db.prepare(`
+      INSERT INTO reference_dicom_links
+        (profile_id, module_code, station_number, slot, patient_id,
+         study_instance_uid, orthanc_study_id, study_description, study_date,
+         modality, series_count, instance_count, ohif_url, linked_at,
+         preview_count, preview_error, preview_checked_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(profile_id, module_code, station_number, slot)
+      DO UPDATE SET
+        patient_id = excluded.patient_id,
+        study_instance_uid = excluded.study_instance_uid,
+        orthanc_study_id = excluded.orthanc_study_id,
+        study_description = excluded.study_description,
+        study_date = excluded.study_date,
+        modality = excluded.modality,
+        series_count = excluded.series_count,
+        instance_count = excluded.instance_count,
+        ohif_url = excluded.ohif_url,
+        linked_at = excluded.linked_at,
+        preview_count = excluded.preview_count,
+        preview_error = excluded.preview_error,
+        preview_checked_at = excluded.preview_checked_at
+    `)
+    const restoreConclusionDicomLink = db.prepare(`
+      INSERT INTO conclusion_dicom_links
+        (profile_id, student_id, student_short_id, module_code, station_number,
+         patient_id, study_instance_uid, orthanc_study_id, study_description,
+         study_date, modality, series_count, instance_count, ohif_url,
+         linked_at, preview_count, preview_error, preview_checked_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(profile_id, student_id, module_code, station_number)
+      DO UPDATE SET
+        student_short_id = excluded.student_short_id,
+        patient_id = excluded.patient_id,
+        study_instance_uid = excluded.study_instance_uid,
+        orthanc_study_id = excluded.orthanc_study_id,
+        study_description = excluded.study_description,
+        study_date = excluded.study_date,
+        modality = excluded.modality,
+        series_count = excluded.series_count,
+        instance_count = excluded.instance_count,
+        ohif_url = excluded.ohif_url,
+        linked_at = excluded.linked_at,
+        preview_count = excluded.preview_count,
+        preview_error = excluded.preview_error,
+        preview_checked_at = excluded.preview_checked_at
+    `)
 
     cfg.modules.forEach((mod, moduleIndex) => {
       const code = cleanCode(mod.code)
@@ -252,6 +350,32 @@ export function saveProfileConfig(db: Database.Database, cfg: ProfileConfig): Pr
       }
     })
 
+    for (const link of existingReferenceDicomLinks) {
+      const moduleCode = cleanCode(link.module_code)
+      const stationNumber = Number(link.station_number)
+      if (!nextStationSet.has(`${moduleCode}:${stationNumber}`)) continue
+      if (link.slot !== 1 && link.slot !== 2) continue
+      restoreReferenceDicomLink.run(
+        profileId,
+        moduleCode,
+        stationNumber,
+        link.slot,
+        link.patient_id || 'UNKNOWN',
+        link.study_instance_uid,
+        link.orthanc_study_id,
+        link.study_description ?? null,
+        link.study_date ?? null,
+        link.modality ?? null,
+        link.series_count ?? 0,
+        link.instance_count ?? 0,
+        link.ohif_url || '',
+        link.linked_at || nowIso(),
+        link.preview_count ?? null,
+        link.preview_error ?? null,
+        link.preview_checked_at ?? null
+      )
+    }
+
     cfg.students.forEach((student) => {
       const studentId = student.student_id.trim().replace(/\D/g, '')
       if (!studentId) return
@@ -260,6 +384,38 @@ export function saveProfileConfig(db: Database.Database, cfg: ProfileConfig): Pr
         if (moduleCode && validModuleCodes.has(moduleCode)) insertEnrollment.run(profileId, studentId, moduleCode, ts)
       }
     })
+
+    const nextStudentModuleSet = new Set(
+      cfg.students.flatMap((student) =>
+        student.module_codes.map((moduleCode) => `${student.student_id.trim().replace(/\D/g, '')}:${cleanCode(moduleCode)}`)
+      )
+    )
+    for (const link of existingConclusionDicomLinks) {
+      const moduleCode = cleanCode(link.module_code)
+      const stationNumber = Number(link.station_number)
+      if (!nextStationSet.has(`${moduleCode}:${stationNumber}`)) continue
+      if (!nextStudentModuleSet.has(`${link.student_id}:${moduleCode}`)) continue
+      restoreConclusionDicomLink.run(
+        profileId,
+        link.student_id,
+        link.student_short_id || link.student_id.slice(-6),
+        moduleCode,
+        stationNumber,
+        link.patient_id || 'UNKNOWN',
+        link.study_instance_uid,
+        link.orthanc_study_id,
+        link.study_description ?? null,
+        link.study_date ?? null,
+        link.modality ?? null,
+        link.series_count ?? 0,
+        link.instance_count ?? 0,
+        link.ohif_url || '',
+        link.linked_at || nowIso(),
+        link.preview_count ?? null,
+        link.preview_error ?? null,
+        link.preview_checked_at ?? null
+      )
+    }
 
     cfg.examiners.forEach((examiner, index) => {
       const name = examiner.name.trim()
@@ -443,13 +599,34 @@ export async function exportProfilePackage(db: Database.Database, outputPath: st
        ORDER BY rdl.module_code, rdl.station_number, rdl.slot`
     )
     .all(cfg.profile.id) as PackagedReferenceDicomLink[]
+  const conclusionDicomLinks = db
+    .prepare(
+      `SELECT cdl.student_id, cdl.student_short_id, cdl.module_code, cdl.station_number,
+              cdl.patient_id, cdl.study_instance_uid, cdl.orthanc_study_id,
+              cdl.study_description, cdl.study_date, cdl.modality,
+              cdl.series_count, cdl.instance_count, cdl.ohif_url, cdl.linked_at,
+              cdl.preview_count, cdl.preview_error, cdl.preview_checked_at
+       FROM conclusion_dicom_links cdl
+       JOIN student_enrollments se
+        ON se.profile_id = cdl.profile_id
+       AND se.student_id = cdl.student_id
+       AND se.module_code = cdl.module_code
+       JOIN assessment_stations st
+        ON st.profile_id = cdl.profile_id
+       AND st.module_code = cdl.module_code
+       AND st.station_number = cdl.station_number
+       WHERE cdl.profile_id = ?
+       ORDER BY cdl.module_code, cdl.station_number, cdl.student_id`
+    )
+    .all(cfg.profile.id) as PackagedConclusionDicomLink[]
   const dicomPackage: DicomLinksPackage = {
     format_version: 1,
     exported_at: nowIso(),
     orthanc_base_url: dicomCfg?.orthanc_base_url ?? null,
     ohif_base_url: dicomCfg?.ohif_base_url ?? null,
     links: dicomLinks,
-    reference_links: referenceDicomLinks
+    reference_links: referenceDicomLinks,
+    conclusion_links: conclusionDicomLinks
   }
   zip.file('dicom-links.json', JSON.stringify(dicomPackage, null, 2))
 
@@ -534,6 +711,7 @@ export async function importProfilePackage(
 
     const links = Array.isArray(payload.links) ? payload.links : []
     const referenceLinks = Array.isArray(payload.reference_links) ? payload.reference_links : []
+    const conclusionLinks = Array.isArray(payload.conclusion_links) ? payload.conclusion_links : []
     const tx = db.transaction(() => {
       db.prepare(`
         DELETE FROM dicom_study_links
@@ -629,6 +807,7 @@ export async function importProfilePackage(
       }
 
       db.prepare('DELETE FROM reference_dicom_links WHERE profile_id = ?').run(cfg.profile.id)
+      db.prepare('DELETE FROM conclusion_dicom_links WHERE profile_id = ?').run(cfg.profile.id)
       const insertReferenceLink = db.prepare(`
         INSERT INTO reference_dicom_links
           (profile_id, module_code, station_number, slot, patient_id,
@@ -636,6 +815,14 @@ export async function importProfilePackage(
            modality, series_count, instance_count, ohif_url, linked_at,
            preview_count, preview_error, preview_checked_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      const insertConclusionLink = db.prepare(`
+        INSERT INTO conclusion_dicom_links
+          (profile_id, student_id, student_short_id, module_code, station_number,
+           patient_id, study_instance_uid, orthanc_study_id, study_description,
+           study_date, modality, series_count, instance_count, ohif_url,
+           linked_at, preview_count, preview_error, preview_checked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
 
       for (const link of referenceLinks) {
@@ -661,6 +848,52 @@ export async function importProfilePackage(
           link.module_code,
           link.station_number,
           link.slot,
+          link.patient_id || 'UNKNOWN',
+          link.study_instance_uid,
+          link.orthanc_study_id,
+          link.study_description ?? null,
+          link.study_date ?? null,
+          link.modality ?? null,
+          link.series_count ?? 0,
+          link.instance_count ?? 0,
+          link.ohif_url || '',
+          link.linked_at || nowIso(),
+          link.preview_count ?? null,
+          link.preview_error ?? null,
+          link.preview_checked_at ?? null
+        )
+      }
+
+      for (const link of conclusionLinks) {
+        if (
+          !link.student_id ||
+          !link.module_code ||
+          !link.station_number ||
+          !link.study_instance_uid ||
+          !link.orthanc_study_id
+        ) {
+          continue
+        }
+        const targetExists = db.prepare(`
+          SELECT 1
+          FROM student_enrollments se
+          JOIN assessment_stations st
+            ON st.profile_id = se.profile_id
+           AND st.module_code = se.module_code
+          WHERE se.profile_id = ?
+            AND se.student_id = ?
+            AND se.module_code = ?
+            AND st.station_number = ?
+          LIMIT 1
+        `).get(cfg.profile.id, link.student_id, link.module_code, link.station_number)
+        if (!targetExists) continue
+
+        insertConclusionLink.run(
+          cfg.profile.id,
+          link.student_id,
+          link.student_short_id || link.student_id.slice(-6),
+          link.module_code,
+          link.station_number,
           link.patient_id || 'UNKNOWN',
           link.study_instance_uid,
           link.orthanc_study_id,

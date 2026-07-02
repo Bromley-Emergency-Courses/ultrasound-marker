@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from 'fs'
 import { join, extname } from 'path'
 import type Database from 'better-sqlite3'
 import { getActiveProfileId } from '../db/queries'
-import type { AuditEntry, DicomStudyLink } from '../types/ipc'
+import type { AuditEntry, ConclusionDicomLink, DicomStudyLink } from '../types/ipc'
 
 const IMAGE_EXTS = new Set(['.tif', '.tiff', '.jpg', '.jpeg', '.png'])
 
@@ -52,6 +52,16 @@ export function runImageAudit(
     dicomLinksByStation.set(key, existing)
   }
 
+  const conclusionLinks = db.prepare(`
+    SELECT *
+    FROM conclusion_dicom_links
+    WHERE profile_id = ?
+  `).all(profileId) as ConclusionDicomLink[]
+  const conclusionLinksByStation = new Map<string, ConclusionDicomLink>()
+  for (const link of conclusionLinks) {
+    conclusionLinksByStation.set(`${link.student_id}|${link.module_code}|${link.station_number}`, link)
+  }
+
   const entries: AuditEntry[] = []
 
   for (const student of students) {
@@ -81,6 +91,8 @@ export function runImageAudit(
         }
 
         const images: string[] = []
+        let img1Slot: string | null = null
+        let img2Slot: string | null = null
         for (const f of files) {
           const ext = extname(f).toLowerCase()
           const nameLower = f.toLowerCase()
@@ -88,6 +100,10 @@ export function runImageAudit(
             conclusion = f
           } else if (/form/i.test(f)) {
             if (!conclusion) conclusion = f
+          } else if (IMAGE_EXTS.has(ext) && nameLower.startsWith('img1_')) {
+            img1Slot = f
+          } else if (IMAGE_EXTS.has(ext) && nameLower.startsWith('img2_')) {
+            img2Slot = f
           } else if (IMAGE_EXTS.has(ext)) {
             images.push(f)
           } else if (ext === '.pdf' && !conclusion) {
@@ -95,8 +111,8 @@ export function runImageAudit(
           }
         }
         images.sort((a, b) => a.localeCompare(b))
-        img1 = images[0] ?? null
-        img2 = images[1] ?? null
+        img1 = img1Slot ?? images[0] ?? null
+        img2 = img2Slot ?? images[img1Slot ? 0 : 1] ?? null
       }
 
       entries.push({
@@ -109,6 +125,8 @@ export function runImageAudit(
         img1,
         img2,
         conclusion,
+        conclusion_dicom_link:
+          conclusionLinksByStation.get(`${student.student_id}|${student.module_code}|${station.number}`) ?? null,
         requires_conclusion: station.has_conclusion,
         dicom_links: dicomLinksByStation.get(`${student.student_id}|${student.module_code}|${station.number}`) ?? [],
         active_dicom_link:

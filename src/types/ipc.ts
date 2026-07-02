@@ -121,6 +121,7 @@ export interface StudentImages {
   img1Path: string | null
   img2Path: string | null
   conclusionPath: string | null
+  conclusionDicomLink: ConclusionDicomLink | null
 }
 
 export interface ReferenceDicomLink {
@@ -148,6 +149,27 @@ export interface ReferenceImages {
   img2Path: string | null
   img1DicomLink: ReferenceDicomLink | null
   img2DicomLink: ReferenceDicomLink | null
+}
+
+export interface ConclusionDicomLink {
+  profile_id: string
+  student_id: string
+  student_short_id: string
+  module_code: string
+  station_number: number
+  patient_id: string
+  study_instance_uid: string
+  orthanc_study_id: string
+  study_description: string | null
+  study_date: string | null
+  modality: string | null
+  series_count: number
+  instance_count: number
+  ohif_url: string
+  linked_at: string
+  preview_count: number | null
+  preview_error: string | null
+  preview_checked_at: string | null
 }
 
 export interface ExaminerMarkDetail {
@@ -221,6 +243,7 @@ export interface AuditEntry {
   img1: string | null
   img2: string | null
   conclusion: string | null
+  conclusion_dicom_link: ConclusionDicomLink | null
   requires_conclusion: boolean
   dicom_links: DicomStudyLink[]
   active_dicom_link: DicomStudyLink | null
@@ -229,6 +252,10 @@ export interface AuditEntry {
 export interface DicomServerConfig {
   orthanc_base_url: string
   ohif_base_url: string
+  orthanc_auth_type?: 'none' | 'bearer' | 'basic'
+  orthanc_auth_token?: string | null
+  orthanc_auth_username?: string | null
+  orthanc_auth_password?: string | null
 }
 
 export interface DicomParsedPatientId {
@@ -330,6 +357,12 @@ export interface ReferenceDicomLinkResult {
   error?: string
 }
 
+export interface ConclusionDicomLinkResult {
+  success: boolean
+  link?: ConclusionDicomLink
+  error?: string
+}
+
 export interface DicomUnlinkResult {
   success: boolean
   restored_unresolved?: DicomUnresolvedStudy
@@ -344,6 +377,7 @@ export interface DicomSyncResult {
   errors: number
   links: DicomStudyLink[]
   reference_links: ReferenceDicomLink[]
+  conclusion_links: ConclusionDicomLink[]
   unresolved_items: DicomUnresolvedStudy[]
 }
 
@@ -363,7 +397,7 @@ export interface DicomUploadResult {
 
 export interface DicomPreparedExportGroup {
   key: string
-  group_type: 'station' | 'reference'
+  group_type: 'station' | 'reference' | 'conclusion'
   folder_path: string
   status: 'valid' | 'invalid'
   reason?: string
@@ -377,6 +411,7 @@ export interface DicomPreparedExportGroup {
   file_count: number
   image_count: number
   dicom_count: number
+  conclusion_count: number
   unsupported_count: number
   warnings: string[]
   planned_action: string
@@ -393,7 +428,7 @@ export interface DicomPreparedExportResult {
 export interface DicomPreparedUploadItem {
   group_key: string
   path?: string
-  status: 'uploaded' | 'skipped' | 'error'
+  status: 'uploaded' | 'copied' | 'skipped' | 'error'
   reason?: string
 }
 
@@ -401,6 +436,7 @@ export interface DicomPreparedUploadResult {
   prepared: DicomPreparedExportResult
   scanned: number
   uploaded: number
+  copied: number
   skipped: number
   errors: number
   items: DicomPreparedUploadItem[]

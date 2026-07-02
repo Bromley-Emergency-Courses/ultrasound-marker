@@ -5,9 +5,12 @@ import type { CsvImportResult, FileSortResult } from '../types/ipc'
 type Step = 'paths' | 'csv' | 'sort' | 'done'
 
 export default function SetupPage(): React.JSX.Element {
-  const { setScreen, setupIsEdit } = useAppStore()
+  const { setScreen, setupIsEdit, openDicomSetup } = useAppStore()
 
   const [step, setStep] = useState<Step>('paths')
+  const [packageImporting, setPackageImporting] = useState(false)
+  const [packageError, setPackageError] = useState<string | null>(null)
+  const [packageWarning, setPackageWarning] = useState<string | null>(null)
 
   // Paths
   const [targetRoot, setTargetRoot] = useState('')
@@ -75,7 +78,77 @@ export default function SetupPage(): React.JSX.Element {
     setSortLoading(false)
   }
 
+  async function handleImportPackage(forceReplace = false): Promise<void> {
+    setPackageImporting(true)
+    setPackageError(null)
+    setPackageWarning(null)
+    try {
+      const result = await window.api.importProfilePackage(forceReplace)
+      if (result?.warning) {
+        setPackageWarning(result.warning)
+        return
+      }
+      if (result?.success) {
+        await window.api.configSet('settings_package_imported', '1')
+        openDicomSetup()
+        return
+      }
+    } catch (err) {
+      setPackageError(String(err))
+    } finally {
+      setPackageImporting(false)
+    }
+  }
+
   const steps: Step[] = ['paths', 'csv', 'sort', 'done']
+
+  if (!setupIsEdit) {
+    return (
+      <div className="min-h-screen bg-slate-100 p-6">
+        <div className="max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-bold text-slate-800">Setup</h1>
+            <button
+              onClick={() => setScreen('login')}
+              className="text-slate-500 hover:text-slate-700 text-sm"
+            >
+              Back to Login
+            </button>
+          </div>
+
+          <Card title="Import Settings Package">
+            <p className="text-slate-600 text-sm">
+              Import the assessment settings package provided for this marking session.
+            </p>
+            {packageError && (
+              <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg p-3">
+                {packageError}
+              </p>
+            )}
+            {packageWarning && (
+              <div className="text-amber-700 text-sm bg-amber-50 border border-amber-200 rounded-lg p-3 flex flex-col gap-3">
+                <p>{packageWarning}</p>
+                <button
+                  onClick={() => handleImportPackage(true)}
+                  disabled={packageImporting}
+                  className="w-full py-2 rounded-lg bg-amber-600 text-white font-semibold hover:bg-amber-700 disabled:opacity-40"
+                >
+                  {packageImporting ? 'Importing...' : 'Replace Existing Profile'}
+                </button>
+              </div>
+            )}
+            <button
+              onClick={() => handleImportPackage(false)}
+              disabled={packageImporting}
+              className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-40"
+            >
+              {packageImporting ? 'Importing...' : 'Import Settings Package'}
+            </button>
+          </Card>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 p-6">

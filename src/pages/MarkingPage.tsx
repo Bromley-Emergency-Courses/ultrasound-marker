@@ -3,7 +3,7 @@ import { useAppStore } from '../store/appStore'
 import ImageViewer from '../components/ImageViewer'
 import DicomPreviewStack from '../components/DicomPreviewStack'
 import CandidateInstructionsPanel from '../components/CandidateInstructionsPanel'
-import type { DicomStudyLink, FieldResponseInput, ReferenceImages, StationFormField } from '../types/ipc'
+import type { ConclusionDicomLink, DicomStudyLink, FieldResponseInput, ReferenceImages, StationFormField } from '../types/ipc'
 
 type MarkValue = number | null
 
@@ -11,6 +11,7 @@ interface StudentImages {
   img1Path: string | null
   img2Path: string | null
   conclusionPath: string | null
+  conclusionDicomLink: ConclusionDicomLink | null
 }
 
 export default function MarkingPage(): React.JSX.Element {
@@ -39,7 +40,12 @@ export default function MarkingPage(): React.JSX.Element {
   const [noStudents, setNoStudents] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [studentImages, setStudentImages] = useState<StudentImages>({ img1Path: null, img2Path: null, conclusionPath: null })
+  const [studentImages, setStudentImages] = useState<StudentImages>({
+    img1Path: null,
+    img2Path: null,
+    conclusionPath: null,
+    conclusionDicomLink: null
+  })
   const [refImages, setRefImages] = useState<ReferenceImages>({
     img1Path: null,
     img2Path: null,
@@ -84,7 +90,7 @@ export default function MarkingPage(): React.JSX.Element {
     setRefImg2Data(null)
     setConclusionData(null)
     setDicomLinks([])
-    setStudentImages({ img1Path: null, img2Path: null, conclusionPath: null })
+    setStudentImages({ img1Path: null, img2Path: null, conclusionPath: null, conclusionDicomLink: null })
     setRefImages({ img1Path: null, img2Path: null, img1DicomLink: null, img2DicomLink: null })
   }
 
@@ -128,19 +134,20 @@ export default function MarkingPage(): React.JSX.Element {
         (!refs.img2DicomLink || refs.img2DicomLink.orthanc_study_id === refs.img1DicomLink.orthanc_study_id)
           ? refs.img1DicomLink.orthanc_study_id
           : null
-      const [reads, splitRefPreview, ref1Preview, ref2Preview] = await Promise.all([
+      const [reads, splitRefPreview, ref1Preview, ref2Preview, conclusionPreview] = await Promise.all([
         Promise.allSettled([
           !hasDicomStudy && imgs.img1Path ? window.api.readImageFile(imgs.img1Path) : Promise.resolve(null),
           !hasDicomStudy && imgs.img2Path ? window.api.readImageFile(imgs.img2Path) : Promise.resolve(null),
           !refs.img1DicomLink && refs.img1Path ? window.api.readImageFile(refs.img1Path) : Promise.resolve(null),
           !refs.img2DicomLink && refs.img2Path ? window.api.readImageFile(refs.img2Path) : Promise.resolve(null),
-          imgs.conclusionPath && c.has_conclusion
+          !imgs.conclusionDicomLink && imgs.conclusionPath && c.has_conclusion
             ? window.api.readImageFile(imgs.conclusionPath)
             : Promise.resolve(null)
         ]),
         splitReferenceStudyId ? window.api.getDicomStudyPreviews(splitReferenceStudyId, 2) : Promise.resolve(null),
         !splitReferenceStudyId && refs.img1DicomLink ? window.api.getDicomStudyPreviews(refs.img1DicomLink.orthanc_study_id, 1) : Promise.resolve(null),
-        !splitReferenceStudyId && refs.img2DicomLink ? window.api.getDicomStudyPreviews(refs.img2DicomLink.orthanc_study_id, 1) : Promise.resolve(null)
+        !splitReferenceStudyId && refs.img2DicomLink ? window.api.getDicomStudyPreviews(refs.img2DicomLink.orthanc_study_id, 1) : Promise.resolve(null),
+        imgs.conclusionDicomLink ? window.api.getDicomStudyPreviews(imgs.conclusionDicomLink.orthanc_study_id, 1) : Promise.resolve(null)
       ])
       const val = (r: PromiseSettledResult<string | null>): string | null =>
         r.status === 'fulfilled' ? r.value : null
@@ -148,7 +155,7 @@ export default function MarkingPage(): React.JSX.Element {
       setStudentImg2Data(val(reads[1]))
       setRefImg1Data(splitRefPreview?.previews[0]?.dataUrl ?? ref1Preview?.previews[0]?.dataUrl ?? val(reads[2]))
       setRefImg2Data(splitRefPreview?.previews[1]?.dataUrl ?? ref2Preview?.previews[0]?.dataUrl ?? val(reads[3]))
-      setConclusionData(val(reads[4]))
+      setConclusionData(conclusionPreview?.previews[0]?.dataUrl ?? val(reads[4]))
     } catch (err) {
       console.error('Image loading failed:', err)
     } finally {
@@ -472,7 +479,16 @@ export default function MarkingPage(): React.JSX.Element {
             <div className="flex gap-4 p-4 bg-white">
               <div className="flex-1">
                 <p className="text-xs font-semibold text-slate-500 mb-2 uppercase">Student Answer</p>
-                <ImageViewer dataUrl={conclusionData} label="Student Conclusion" className="h-64 rounded-lg" />
+                {studentImages.conclusionDicomLink ? (
+                  <DicomPreviewStack
+                    orthancStudyId={studentImages.conclusionDicomLink.orthanc_study_id}
+                    label="Student Conclusion"
+                    initialIndex={0}
+                    className="h-64 rounded-lg"
+                  />
+                ) : (
+                  <ImageViewer dataUrl={conclusionData} label="Student Conclusion" className="h-64 rounded-lg" />
+                )}
               </div>
               <div className="flex-1 bg-blue-50 rounded-lg p-4">
                 <p className="text-xs font-semibold text-blue-600 mb-2 uppercase">Model Answer</p>

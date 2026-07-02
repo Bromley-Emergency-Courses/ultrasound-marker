@@ -7,6 +7,7 @@ import type {
   CsvStudentPreviewRow,
   DicomPreparedExportResult,
   DicomPreparedUploadResult,
+  DicomServerConfig,
   DicomStudyCandidate,
   DicomStudyCandidateDetails,
   DicomStudyLink,
@@ -49,9 +50,10 @@ function entryStatus(e: AuditEntry): 'ok' | 'partial' | 'missing' {
   const hasCompleteDicomImages = (e.active_dicom_link?.preview_count ?? 0) >= 2
   const hasCompleteLocalImages = Boolean(e.img1 && e.img2)
   const hasImages = hasCompleteDicomImages || (!e.active_dicom_link && hasCompleteLocalImages)
-  const hasRequired = hasImages && (!e.requires_conclusion || e.conclusion)
+  const hasConclusion = Boolean(e.conclusion || e.conclusion_dicom_link)
+  const hasRequired = hasImages && (!e.requires_conclusion || hasConclusion)
   if (hasRequired) return 'ok'
-  if (e.active_dicom_link || e.img1 || e.img2 || e.conclusion) return 'partial'
+  if (e.active_dicom_link || e.img1 || e.img2 || e.conclusion || e.conclusion_dicom_link) return 'partial'
   return 'missing'
 }
 
@@ -287,11 +289,13 @@ function AuditPanel(): React.JSX.Element {
   const [linking, setLinking] = useState<{ entry: AuditEntry; slot: 'img1' | 'img2' | 'conclusion' } | null>(null)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [resolverEntry, setResolverEntry] = useState<AuditEntry | null>(null)
+  const [conclusionResolverEntry, setConclusionResolverEntry] = useState<AuditEntry | null>(null)
   const [referenceResolver, setReferenceResolver] = useState<{ entry: ReferenceAuditEntry; slot: 1 | 2 } | null>(null)
   const [refreshingLinkId, setRefreshingLinkId] = useState<number | null>(null)
   const [unlinkingLinkId, setUnlinkingLinkId] = useState<number | null>(null)
   const [linkingReference, setLinkingReference] = useState<{ module_code: string; station_number: number; slot: 1 | 2 } | null>(null)
   const [unlinkingReference, setUnlinkingReference] = useState<{ module_code: string; station_number: number; slot: 1 | 2 } | null>(null)
+  const [unlinkingConclusion, setUnlinkingConclusion] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -417,6 +421,27 @@ function AuditPanel(): React.JSX.Element {
     }
   }
 
+  async function handleConclusionDicomUnlink(entry: AuditEntry): Promise<void> {
+    setLinkError(null)
+    const key = `${entry.student_id}|${entry.module_code}|${entry.station_number}`
+    setUnlinkingConclusion(key)
+    try {
+      const result = await window.api.unlinkConclusionDicomStudy(
+        entry.student_id,
+        entry.module_code,
+        entry.station_number
+      )
+      if (!result?.success) {
+        setLinkError(`Failed to unlink conclusion DICOM: ${result?.error ?? 'Unknown error'}`)
+      }
+      await load()
+    } catch (err) {
+      setLinkError(`Failed to unlink conclusion DICOM: ${String(err)}`)
+    } finally {
+      setUnlinkingConclusion(null)
+    }
+  }
+
   async function handleRefreshDicom(link: DicomStudyLink): Promise<void> {
     setLinkError(null)
     setRefreshingLinkId(link.id)
@@ -456,6 +481,11 @@ function AuditPanel(): React.JSX.Element {
 
   async function handleReferenceDicomLinked(): Promise<void> {
     setReferenceResolver(null)
+    await load()
+  }
+
+  async function handleConclusionDicomLinked(): Promise<void> {
+    setConclusionResolverEntry(null)
     await load()
   }
 
@@ -641,10 +671,13 @@ function AuditPanel(): React.JSX.Element {
                     </td>
                     <td className="px-4 py-2.5">
                       {e.requires_conclusion ? (
-                        <SlotIndicator
+                        <ConclusionSlot
                           value={e.conclusion}
-                          label="Conclusion"
-                          onLink={() => !isLinking && handleLink(e, 'conclusion')}
+                          dicomLink={e.conclusion_dicom_link}
+                          loading={unlinkingConclusion === `${e.student_id}|${e.module_code}|${e.station_number}`}
+                          onLinkDicom={() => setConclusionResolverEntry(e)}
+                          onUnlinkDicom={() => handleConclusionDicomUnlink(e)}
+                          onLinkFile={() => !isLinking && handleLink(e, 'conclusion')}
                         />
                       ) : (
                         <span className="text-xs text-slate-300">N/A</span>
@@ -660,7 +693,7 @@ function AuditPanel(): React.JSX.Element {
 
       <p className="text-xs text-slate-400">
         Showing {filtered.length} of {entries.length} station slots.
-        Local files are copied into the correct student/station folder. Linked DICOM studies are the active image source for marking.
+        Local image files are copied into the correct student/station folder. Linked DICOM studies, reference images, and conclusion forms are the active image source for marking.
       </p>
 
       {resolverEntry && (
@@ -668,6 +701,14 @@ function AuditPanel(): React.JSX.Element {
           entry={resolverEntry}
           onClose={() => setResolverEntry(null)}
           onLinked={handleDicomLinked}
+        />
+      )}
+      {conclusionResolverEntry && (
+        <DicomResolverDialog
+          entry={conclusionResolverEntry}
+          linkMode="conclusion"
+          onClose={() => setConclusionResolverEntry(null)}
+          onLinked={handleConclusionDicomLinked}
         />
       )}
       {referenceResolver && (
@@ -678,6 +719,72 @@ function AuditPanel(): React.JSX.Element {
           onLinked={handleReferenceDicomLinked}
         />
       )}
+    </div>
+  )
+}
+
+function ConclusionSlot({
+  value,
+  dicomLink,
+  loading,
+  onLinkDicom,
+  onUnlinkDicom,
+  onLinkFile
+}: {
+  value: string | null
+  dicomLink: AuditEntry['conclusion_dicom_link']
+  loading: boolean
+  onLinkDicom: () => void
+  onUnlinkDicom: () => void
+  onLinkFile: () => void
+}): React.JSX.Element {
+  const hasLink = Boolean(dicomLink || value)
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className={`w-2 h-2 rounded-full ${hasLink ? 'bg-green-500' : 'bg-red-400'}`} />
+        {dicomLink ? (
+          <span className="text-xs text-slate-600 truncate max-w-[180px]" title={dicomLink.study_instance_uid}>
+            DICOM {dicomLink.patient_id}
+          </span>
+        ) : value ? (
+          <span className="text-xs text-slate-600 truncate max-w-[180px]" title={value}>
+            {value}
+          </span>
+        ) : (
+          <span className="text-xs text-red-600">Missing</span>
+        )}
+      </div>
+      {dicomLink?.preview_error && (
+        <p className="text-[11px] text-amber-700 line-clamp-1" title={dicomLink.preview_error}>
+          {dicomLink.preview_error}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-1">
+        <button
+          onClick={onLinkDicom}
+          disabled={loading}
+          className="px-2 py-1 rounded border border-indigo-200 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"
+        >
+          {loading ? 'Working...' : dicomLink ? 'Replace DICOM' : 'Link DICOM'}
+        </button>
+        {dicomLink && (
+          <button
+            onClick={onUnlinkDicom}
+            disabled={loading}
+            className="px-2 py-1 rounded border border-red-200 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
+          >
+            Unlink DICOM
+          </button>
+        )}
+        <button
+          onClick={onLinkFile}
+          disabled={loading}
+          className="px-2 py-1 rounded border border-slate-300 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+        >
+          {value ? 'Replace file' : 'Link file'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -868,10 +975,12 @@ function formatDicomDate(value: string | null | undefined): string {
 
 function DicomResolverDialog({
   entry,
+  linkMode = 'station',
   onClose,
   onLinked
 }: {
   entry: AuditEntry
+  linkMode?: 'station' | 'conclusion'
   onClose: () => void
   onLinked: () => void
 }): React.JSX.Element {
@@ -941,21 +1050,21 @@ function DicomResolverDialog({
         currentLink?.student_id === entry.student_id &&
         currentLink?.module_code === entry.module_code &&
         currentLink?.station_number === entry.station_number
-      const moveExisting = Boolean(currentLink && !sameTarget)
-      if (moveExisting) {
-        const ok = window.confirm(
-          `This DICOM study is currently linked to ${currentLink!.student_id} ${currentLink!.module_code} Station ${currentLink!.station_number}. Move it to ${entry.student_id} ${entry.module_code} Station ${entry.station_number}?`
-        )
-        if (!ok) return
-      }
 
-      const result = await window.api.linkDicomStudyToStation(
-        selectedStudyId,
-        entry.student_id,
-        entry.module_code,
-        entry.station_number,
-        moveExisting
-      )
+      const result = linkMode === 'conclusion'
+        ? await window.api.linkConclusionDicomStudy(
+            selectedStudyId,
+            entry.student_id,
+            entry.module_code,
+            entry.station_number
+          )
+        : await window.api.linkDicomStudyToStation(
+            selectedStudyId,
+            entry.student_id,
+            entry.module_code,
+            entry.station_number,
+            false
+          )
       if (!result?.success) {
         setError(result?.error ?? 'Failed to link DICOM study.')
         return
@@ -983,7 +1092,9 @@ function DicomResolverDialog({
       <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-200 flex items-center gap-3">
           <div className="min-w-0">
-            <h2 className="text-lg font-bold text-slate-800">Link DICOM study</h2>
+            <h2 className="text-lg font-bold text-slate-800">
+              {linkMode === 'conclusion' ? 'Link conclusion DICOM' : 'Link DICOM study'}
+            </h2>
             <p className="text-sm text-slate-500 truncate">
               {entry.full_name} · {entry.student_id} · {entry.module_code} Stn {entry.station_number}
             </p>
@@ -1077,7 +1188,7 @@ function DicomResolverDialog({
                   }`}>
                     {sameTarget
                       ? 'This study is already linked to this station.'
-                      : `Currently linked to ${currentLink.student_id} ${currentLink.module_code} Station ${currentLink.station_number}. Linking here will move it.`}
+                      : `This study is also linked to ${currentLink.student_id} ${currentLink.module_code} Station ${currentLink.station_number}. Linking here will keep that link in place.`}
                   </div>
                 )}
                 {selected.unresolved && (
@@ -1116,7 +1227,7 @@ function DicomResolverDialog({
                     disabled={linking || loadingDetails || !selectedStudyId || sameTarget}
                     className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40"
                   >
-                    {linking ? 'Linking...' : currentLink && !sameTarget ? 'Move to station' : 'Link to station'}
+                    {linking ? 'Linking...' : linkMode === 'conclusion' ? 'Link as conclusion' : 'Link to station'}
                   </button>
                 </div>
               </>
@@ -3074,9 +3185,13 @@ function SyncPanel(): React.JSX.Element {
 
 // ── DICOM Sync panel ─────────────────────────────────────────────────────────
 
-function DicomSyncPanel(): React.JSX.Element {
+export function DicomSyncPanel(): React.JSX.Element {
   const [orthancBaseUrl, setOrthancBaseUrl] = useState('http://192.168.1.200:8042')
   const [ohifBaseUrl, setOhifBaseUrl] = useState('http://192.168.1.200:3000')
+  const [orthancAuthType, setOrthancAuthType] = useState<NonNullable<DicomServerConfig['orthanc_auth_type']>>('none')
+  const [orthancAuthToken, setOrthancAuthToken] = useState('')
+  const [orthancAuthUsername, setOrthancAuthUsername] = useState('')
+  const [orthancAuthPassword, setOrthancAuthPassword] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; name?: string; version?: string; error?: string } | null>(null)
   const [syncing, setSyncing] = useState(false)
@@ -3092,10 +3207,26 @@ function DicomSyncPanel(): React.JSX.Element {
   const [preparedUploadResult, setPreparedUploadResult] = useState<DicomPreparedUploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const cfg = {
+  const cfg: DicomServerConfig = {
     orthanc_base_url: orthancBaseUrl.trim(),
-    ohif_base_url: ohifBaseUrl.trim()
+    ohif_base_url: ohifBaseUrl.trim(),
+    orthanc_auth_type: orthancAuthType,
+    orthanc_auth_token: orthancAuthType === 'bearer' ? orthancAuthToken : null,
+    orthanc_auth_username: orthancAuthType === 'basic' ? orthancAuthUsername : null,
+    orthanc_auth_password: orthancAuthType === 'basic' ? orthancAuthPassword : null
   }
+  const preparedValidGroups = preparedResult?.groups.filter((group) => group.status === 'valid') ?? []
+  const preparedHasDicomGroups = preparedValidGroups.some((group) => group.group_type !== 'conclusion')
+  const preparedHasConclusionGroups = preparedValidGroups.some((group) => group.group_type === 'conclusion')
+  const processPreparedLabel = preparedUploading
+    ? preparedHasDicomGroups
+      ? 'Uploading and linking...'
+      : 'Uploading conclusion forms...'
+    : preparedHasDicomGroups && preparedHasConclusionGroups
+      ? 'Upload DICOM and Link Forms'
+    : preparedHasConclusionGroups
+        ? 'Upload Conclusion Forms'
+        : 'Upload Valid DICOM Groups'
 
   const loadUnresolved = useCallback(async () => {
     const rows = await window.api.getDicomUnresolved(100)
@@ -3106,6 +3237,10 @@ function DicomSyncPanel(): React.JSX.Element {
     window.api.getDicomConfig().then((saved) => {
       if (saved?.orthanc_base_url) setOrthancBaseUrl(saved.orthanc_base_url)
       if (saved?.ohif_base_url) setOhifBaseUrl(saved.ohif_base_url)
+      setOrthancAuthType(saved?.orthanc_auth_type ?? 'none')
+      setOrthancAuthToken(saved?.orthanc_auth_token ?? '')
+      setOrthancAuthUsername(saved?.orthanc_auth_username ?? '')
+      setOrthancAuthPassword(saved?.orthanc_auth_password ?? '')
     })
     loadUnresolved()
   }, [loadUnresolved])
@@ -3114,6 +3249,14 @@ function DicomSyncPanel(): React.JSX.Element {
     setError(null)
     if (!cfg.orthanc_base_url || !cfg.ohif_base_url) {
       setError('Both Orthanc and OHIF URLs are required.')
+      return
+    }
+    if (cfg.orthanc_auth_type === 'bearer' && !cfg.orthanc_auth_token?.trim()) {
+      setError('Bearer token is required when bearer auth is selected.')
+      return
+    }
+    if (cfg.orthanc_auth_type === 'basic' && !cfg.orthanc_auth_username?.trim()) {
+      setError('Username is required when basic auth is selected.')
       return
     }
     try {
@@ -3183,14 +3326,14 @@ function DicomSyncPanel(): React.JSX.Element {
     if (!preparedFolder || !preparedResult) return
     const validKeys = preparedResult.groups.filter((group) => group.status === 'valid').map((group) => group.key)
     if (validKeys.length === 0) {
-      setError('No valid station folders are ready to upload.')
+      setError('No valid items are ready to process.')
       return
     }
     setPreparedUploading(true)
     setError(null)
     setPreparedUploadResult(null)
     setSyncResult(null)
-    await saveConfig()
+    if (preparedHasDicomGroups) await saveConfig()
     try {
       const result = await window.api.uploadPreparedDicomExportFolder(
         cfg,
@@ -3199,8 +3342,10 @@ function DicomSyncPanel(): React.JSX.Element {
       ) as DicomPreparedUploadResult
       setPreparedUploadResult(result)
       setPreparedResult(result.prepared)
-      setSyncResult(result.sync_result)
-      setUnresolved(result.sync_result.unresolved_items)
+      if (result.sync_result.run_id > 0) {
+        setSyncResult(result.sync_result)
+        setUnresolved(result.sync_result.unresolved_items)
+      }
     } catch (err) {
       setError(String(err))
     } finally {
@@ -3230,9 +3375,11 @@ function DicomSyncPanel(): React.JSX.Element {
         <p className="font-semibold mb-1">Hosted DICOM bridge</p>
         <p>
           This imports Orthanc study references only. It expects DICOM Patient ID values like{' '}
-          <code className="bg-blue-100 px-1 rounded">153883-AS-08</code>, links matched studies to
-          the student register, and builds OHIF study URLs for marking. Image files are not copied
-          to examiner machines.
+          <code className="bg-blue-100 px-1 rounded">153883-AS-08</code>,{' '}
+          <code className="bg-blue-100 px-1 rounded">REF-AS-08</code>, or{' '}
+          <code className="bg-blue-100 px-1 rounded">153883-AS-08c</code>, links matched studies to
+          the profile, and builds OHIF study URLs for marking. Image files are not copied to
+          examiner machines.
         </p>
       </div>
 
@@ -3249,6 +3396,60 @@ function DicomSyncPanel(): React.JSX.Element {
           onChange={setOhifBaseUrl}
           placeholder="https://images.example.org"
         />
+      </div>
+
+      <div className="border border-slate-200 rounded-xl p-4 flex flex-col gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-semibold text-slate-600">Orthanc API auth</span>
+            <select
+              value={orthancAuthType}
+              onChange={(event) => setOrthancAuthType(event.target.value as NonNullable<DicomServerConfig['orthanc_auth_type']>)}
+              className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700"
+            >
+              <option value="none">No auth</option>
+              <option value="bearer">Bearer token</option>
+              <option value="basic">Basic auth</option>
+            </select>
+          </label>
+          {orthancAuthType === 'bearer' && (
+            <label className="md:col-span-2 flex flex-col gap-1">
+              <span className="text-sm font-semibold text-slate-600">Bearer token</span>
+              <input
+                value={orthancAuthToken}
+                onChange={(event) => setOrthancAuthToken(event.target.value)}
+                type="password"
+                placeholder="Read-only or admin token"
+                className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700"
+              />
+            </label>
+          )}
+          {orthancAuthType === 'basic' && (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="text-sm font-semibold text-slate-600">Username</span>
+                <input
+                  value={orthancAuthUsername}
+                  onChange={(event) => setOrthancAuthUsername(event.target.value)}
+                  className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-sm font-semibold text-slate-600">Password</span>
+                <input
+                  value={orthancAuthPassword}
+                  onChange={(event) => setOrthancAuthPassword(event.target.value)}
+                  type="password"
+                  className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700"
+                />
+              </label>
+            </>
+          )}
+        </div>
+        <p className="text-xs text-slate-500">
+          Profile packages include DICOM links and server URLs, but not Orthanc API credentials.
+          Give examiners read-only credentials separately.
+        </p>
       </div>
 
       {error && (
@@ -3298,9 +3499,10 @@ function DicomSyncPanel(): React.JSX.Element {
           <p className="text-sm text-slate-500">
             Select an export root containing candidate folders named like{' '}
             <code className="bg-slate-100 px-1 rounded">123456-AA-01</code> or reference folders named like{' '}
-            <code className="bg-slate-100 px-1 rounded">REF-AA-01</code>. JPG and PNG files are
-            converted to DICOM; existing DICOM files are normalized into one study per folder. TIFF files
-            are reported and skipped.
+            <code className="bg-slate-100 px-1 rounded">REF-AA-01</code>. Conclusion form JPG/PNG files named like{' '}
+            <code className="bg-slate-100 px-1 rounded">123456-AA-01c.jpg</code> are converted to DICOM
+            and linked as conclusion forms. JPG and PNG station/reference files are converted to DICOM;
+            existing DICOM files are normalized into one study per folder. TIFF station/reference files are reported and skipped.
           </p>
         </div>
         <div className="flex gap-2">
@@ -3331,12 +3533,11 @@ function DicomSyncPanel(): React.JSX.Element {
               preparedUploading ||
               !preparedResult ||
               preparedResult.valid_groups === 0 ||
-              !orthancBaseUrl.trim() ||
-              !ohifBaseUrl.trim()
+              (preparedHasDicomGroups && (!orthancBaseUrl.trim() || !ohifBaseUrl.trim()))
             }
             className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-40"
           >
-            {preparedUploading ? 'Preparing and syncing...' : 'Upload Valid Groups and Sync'}
+            {processPreparedLabel}
           </button>
         </div>
 
@@ -3349,7 +3550,7 @@ function DicomSyncPanel(): React.JSX.Element {
             <p className={`font-semibold mb-3 ${
               preparedResult.invalid_groups > 0 ? 'text-amber-700' : 'text-green-700'
             }`}>
-              Found {preparedResult.valid_groups} valid folder(s) and {preparedResult.invalid_groups} invalid.
+              Found {preparedResult.valid_groups} valid item(s) and {preparedResult.invalid_groups} invalid.
             </p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-slate-700">
               <Metric label="Groups" value={preparedResult.scanned_groups} />
@@ -3364,7 +3565,7 @@ function DicomSyncPanel(): React.JSX.Element {
             {preparedResult.groups.some((group) => group.status === 'valid') && (
               <details className="mt-4" open>
                 <summary className="cursor-pointer text-slate-700 font-medium">
-                  Valid DICOM groups
+                  Valid upload/link items
                 </summary>
                 <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
                   <table className="w-full text-xs">
@@ -3386,6 +3587,8 @@ function DicomSyncPanel(): React.JSX.Element {
                             <td className="px-3 py-2 text-slate-700">
                               {group.group_type === 'reference'
                                 ? 'Reference image'
+                                : group.group_type === 'conclusion'
+                                  ? `${group.student_id} ${group.full_name ? `- ${group.full_name}` : ''}`
                                 : `${group.student_id} ${group.full_name ? `- ${group.full_name}` : ''}`}
                             </td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
@@ -3393,12 +3596,18 @@ function DicomSyncPanel(): React.JSX.Element {
                                 ? group.source_station_number === group.station_number
                                   ? `REF ${group.module_code} Stn ${group.station_number}`
                                   : `REF ${group.module_code} source Stn ${group.source_station_number} -> Stn ${group.station_number}`
+                                : group.group_type === 'conclusion'
+                                  ? group.source_station_number === group.station_number
+                                    ? `${group.module_code} Stn ${group.station_number} conclusion`
+                                    : `${group.module_code} source Stn ${group.source_station_number} -> Stn ${group.station_number} conclusion`
                                 : group.source_station_number === group.station_number
                                   ? `${group.module_code} Stn ${group.station_number}`
                                   : `${group.module_code} source Stn ${group.source_station_number} -> Stn ${group.station_number}`}
                             </td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
-                              {group.image_count} image / {group.dicom_count} DICOM
+                              {group.group_type === 'conclusion'
+                                ? `${group.conclusion_count} conclusion`
+                                : `${group.image_count} image / ${group.dicom_count} DICOM`}
                             </td>
                             <td className="px-3 py-2 text-amber-700">
                               {group.warnings.length > 0 ? group.warnings.join(' ') : 'None'}
@@ -3414,7 +3623,7 @@ function DicomSyncPanel(): React.JSX.Element {
             {preparedResult.groups.some((group) => group.status === 'invalid') && (
               <details className="mt-4" open>
                 <summary className="cursor-pointer text-amber-700 font-medium">
-                  Invalid or skipped DICOM groups
+                  Invalid or skipped items
                 </summary>
                 <ul className="mt-2 space-y-2 text-xs max-h-48 overflow-y-auto">
                   {preparedResult.groups
@@ -3573,6 +3782,23 @@ function DicomSyncPanel(): React.JSX.Element {
                     className="font-mono text-slate-600 break-all"
                   >
                     REF {link.module_code} Stn {link.station_number} slot {link.slot}: {link.study_instance_uid}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {syncResult.conclusion_links.length > 0 && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-green-700 font-medium">
+                {syncResult.conclusion_links.length} linked conclusion form(s)
+              </summary>
+              <ul className="mt-2 space-y-1 text-xs max-h-44 overflow-y-auto">
+                {syncResult.conclusion_links.map((link) => (
+                  <li
+                    key={`${link.profile_id}-${link.student_id}-${link.module_code}-${link.station_number}`}
+                    className="font-mono text-slate-600 break-all"
+                  >
+                    {link.student_id} {link.module_code} Stn {link.station_number} conclusion: {link.study_instance_uid}
                   </li>
                 ))}
               </ul>

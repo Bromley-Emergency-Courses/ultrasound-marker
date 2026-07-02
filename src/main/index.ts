@@ -44,6 +44,7 @@ import {
   verifyAdminPin
 } from '../ipc/profilePackages'
 import {
+  getConclusionDicomLink,
   getDicomLinksForStation,
   getDicomServerConfig,
   getDicomStudyCandidateDetails,
@@ -54,6 +55,7 @@ import {
   getDicomUnresolvedStudyDetails,
   getRecentDicomUnresolved,
   linkDicomStudyToStation,
+  linkConclusionDicomStudy,
   linkReferenceDicomStudy,
   linkUnresolvedDicomStudyToStation,
   prepareDicomExportFolder,
@@ -62,6 +64,7 @@ import {
   syncDicomStudies,
   testOrthancConnection,
   unlinkDicomStudyLink,
+  unlinkConclusionDicomStudy,
   unlinkReferenceDicomStudy,
   uploadPreparedDicomExportFolder,
   uploadDicomFolderToOrthanc
@@ -666,9 +669,15 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     'images:getStudentImages',
     (_e, student_id: string, module_code: string, station_number: number) => {
-      const targetRoot = db ? getConfig(db, 'target_root') : null
-      if (!targetRoot) return { img1Path: null, img2Path: null, conclusionPath: null }
-      return getStudentImages(targetRoot, student_id, module_code, station_number)
+      const database = getDb()
+      const targetRoot = getConfig(database, 'target_root')
+      const local = targetRoot
+        ? getStudentImages(targetRoot, student_id, module_code, station_number)
+        : { img1Path: null, img2Path: null, conclusionPath: null }
+      return {
+        ...local,
+        conclusionDicomLink: getConclusionDicomLink(database, student_id, module_code, station_number)
+      }
     }
   )
 
@@ -906,6 +915,20 @@ function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    'dicom:linkConclusionStudy',
+    (_e, orthanc_study_id: string, student_id: string, module_code: string, station_number: number) => {
+      return linkConclusionDicomStudy(getDb(), orthanc_study_id, student_id, module_code, station_number)
+    }
+  )
+
+  ipcMain.handle(
+    'dicom:unlinkConclusionStudy',
+    (_e, student_id: string, module_code: string, station_number: number) => {
+      return unlinkConclusionDicomStudy(getDb(), student_id, module_code, station_number)
+    }
+  )
+
+  ipcMain.handle(
     'dicom:linkUnresolvedToStation',
     (
       _e,
@@ -941,11 +964,24 @@ function registerIpcHandlers(): void {
       const destDir = join(targetRoot, student_id, module_code, 'Practical', `Station ${station_number}`)
       if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
 
-      const ext = basename(srcPath).includes('.') ? '.' + basename(srcPath).split('.').pop()! : ''
+      const ext = extname(srcPath).toLowerCase()
       const shortId = student_id.slice(-6)
-      const destName = slot === 'conclusion' ? `CONCLUSION_${shortId}${ext}` : basename(srcPath)
+      const destName =
+        slot === 'conclusion'
+          ? `CONCLUSION_${shortId}${ext}`
+          : slot === 'img1'
+            ? `IMG1_${shortId}${ext}`
+            : `IMG2_${shortId}${ext}`
       const destPath = join(destDir, destName)
       try {
+        if (slot === 'img1' || slot === 'img2') {
+          const slotPrefix = slot === 'img1' ? `img1_${shortId}` : `img2_${shortId}`
+          for (const entry of readdirSync(destDir)) {
+            if (entry.toLowerCase().startsWith(slotPrefix) && entry !== destName) {
+              try { unlinkSync(join(destDir, entry)) } catch { /* non-fatal cleanup */ }
+            }
+          }
+        }
         copyFileSync(srcPath, destPath)
         return { success: true, destPath }
       } catch (err) {

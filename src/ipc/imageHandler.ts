@@ -22,6 +22,8 @@ export function getStudentImages(
 
   const entries = readdirSync(stationDir)
   const images: string[] = []
+  let img1SlotPath: string | null = null
+  let img2SlotPath: string | null = null
   let conclusionPath: string | null = null
 
   for (const entry of entries) {
@@ -34,6 +36,10 @@ export function getStudentImages(
     } else if (/form/i.test(entry)) {
       // Form files (e.g. "100114827 Form E4.jpg") are conclusions, not images
       if (!conclusionPath) conclusionPath = fullPath
+    } else if (IMAGE_EXTS.has(ext) && nameLower.startsWith('img1_')) {
+      img1SlotPath = fullPath
+    } else if (IMAGE_EXTS.has(ext) && nameLower.startsWith('img2_')) {
+      img2SlotPath = fullPath
     } else if (IMAGE_EXTS.has(ext)) {
       images.push(fullPath)
     } else if (ext === '.pdf') {
@@ -44,8 +50,8 @@ export function getStudentImages(
   images.sort((a, b) => basename(a).localeCompare(basename(b)))
 
   return {
-    img1Path: images[0] ?? null,
-    img2Path: images[1] ?? null,
+    img1Path: img1SlotPath ?? images[0] ?? null,
+    img2Path: img2SlotPath ?? images[img1SlotPath ? 0 : 1] ?? null,
     conclusionPath
   }
 }

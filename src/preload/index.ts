@@ -192,20 +192,55 @@ const api = {
 
   // DICOM / Orthanc
   getDicomConfig: () => ipcRenderer.invoke('dicom:getConfig'),
-  saveDicomConfig: (cfg: { orthanc_base_url: string; ohif_base_url: string }) =>
+  saveDicomConfig: (cfg: {
+    orthanc_base_url: string
+    ohif_base_url: string
+    orthanc_auth_type?: 'none' | 'bearer' | 'basic'
+    orthanc_auth_token?: string | null
+    orthanc_auth_username?: string | null
+    orthanc_auth_password?: string | null
+  }) =>
     ipcRenderer.invoke('dicom:saveConfig', cfg),
-  testDicomConnection: (cfg: { orthanc_base_url: string; ohif_base_url: string }) =>
+  testDicomConnection: (cfg: {
+    orthanc_base_url: string
+    ohif_base_url: string
+    orthanc_auth_type?: 'none' | 'bearer' | 'basic'
+    orthanc_auth_token?: string | null
+    orthanc_auth_username?: string | null
+    orthanc_auth_password?: string | null
+  }) =>
     ipcRenderer.invoke('dicom:testConnection', cfg),
-  uploadDicomFolder: (cfg: { orthanc_base_url: string; ohif_base_url: string }, folderPath: string) =>
+  uploadDicomFolder: (cfg: {
+    orthanc_base_url: string
+    ohif_base_url: string
+    orthanc_auth_type?: 'none' | 'bearer' | 'basic'
+    orthanc_auth_token?: string | null
+    orthanc_auth_username?: string | null
+    orthanc_auth_password?: string | null
+  }, folderPath: string) =>
     ipcRenderer.invoke('dicom:uploadFolder', cfg, folderPath),
   prepareDicomExportFolder: (folderPath: string) =>
     ipcRenderer.invoke('dicom:prepareUploadExportFolder', folderPath),
   uploadPreparedDicomExportFolder: (
-    cfg: { orthanc_base_url: string; ohif_base_url: string },
+    cfg: {
+      orthanc_base_url: string
+      ohif_base_url: string
+      orthanc_auth_type?: 'none' | 'bearer' | 'basic'
+      orthanc_auth_token?: string | null
+      orthanc_auth_username?: string | null
+      orthanc_auth_password?: string | null
+    },
     folderPath: string,
     validGroupKeys: string[]
   ) => ipcRenderer.invoke('dicom:uploadPreparedExportFolder', cfg, folderPath, validGroupKeys),
-  syncDicomStudies: (cfg: { orthanc_base_url: string; ohif_base_url: string }) =>
+  syncDicomStudies: (cfg: {
+    orthanc_base_url: string
+    ohif_base_url: string
+    orthanc_auth_type?: 'none' | 'bearer' | 'basic'
+    orthanc_auth_token?: string | null
+    orthanc_auth_username?: string | null
+    orthanc_auth_password?: string | null
+  }) =>
     ipcRenderer.invoke('dicom:sync', cfg),
   getDicomLinksForStation: (
     student_id: string,
@@ -241,6 +276,17 @@ const api = {
     station_number: number,
     slot: 1 | 2
   ) => ipcRenderer.invoke('dicom:unlinkReferenceStudy', module_code, station_number, slot),
+  linkConclusionDicomStudy: (
+    orthanc_study_id: string,
+    student_id: string,
+    module_code: string,
+    station_number: number
+  ) => ipcRenderer.invoke('dicom:linkConclusionStudy', orthanc_study_id, student_id, module_code, station_number),
+  unlinkConclusionDicomStudy: (
+    student_id: string,
+    module_code: string,
+    station_number: number
+  ) => ipcRenderer.invoke('dicom:unlinkConclusionStudy', student_id, module_code, station_number),
   linkUnresolvedDicomToStation: (
     unresolved_id: number,
     student_id: string,
