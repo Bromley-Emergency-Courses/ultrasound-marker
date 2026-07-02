@@ -163,7 +163,7 @@ export default function DashboardPage(): React.JSX.Element {
                             module_name: mod.module_name,
                             station_number: st.station_number,
                             has_conclusion: st.form_fields?.some((field) => field.field_id.toUpperCase().includes('CONCLUSION')) ?? false,
-                            conclusion_reference_text: null,
+                            conclusion_reference_text: st.conclusion_reference_text ?? null,
                             candidate_instructions: st.candidate_instructions ?? null,
                             form_fields: st.form_fields ?? []
                           })
@@ -174,7 +174,7 @@ export default function DashboardPage(): React.JSX.Element {
                             module_name: mod.module_name,
                             station_number: st.station_number,
                             has_conclusion: st.form_fields?.some((field) => field.field_id.toUpperCase().includes('CONCLUSION')) ?? false,
-                            conclusion_reference_text: null,
+                            conclusion_reference_text: st.conclusion_reference_text ?? null,
                             candidate_instructions: st.candidate_instructions ?? null,
                             form_fields: st.form_fields ?? []
                           })

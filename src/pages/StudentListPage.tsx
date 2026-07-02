@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '../store/appStore'
+import type { StationProgress } from '../types/ipc'
 
 type StateFilter = 'all' | 'UNMARKED' | 'FIRST_MARK' | 'AGREED' | 'DISAGREEMENT' | 'RESOLVED'
 
@@ -20,7 +21,15 @@ const STATE_STYLES: Record<string, string> = {
 }
 
 export default function StudentListPage(): React.JSX.Element {
-  const { studentListContext, setScreen, openMarkingForStudent, examinerName } = useAppStore()
+  const {
+    studentListContext,
+    setScreen,
+    openMarkingForStudent,
+    openStudentList,
+    examinerName,
+    dashboardProgress,
+    setDashboardProgress
+  } = useAppStore()
   const ctx = studentListContext!
 
   const [students, setStudents] = useState<{ student_id: string; full_name: string; state: string }[]>([])
@@ -33,14 +42,18 @@ export default function StudentListPage(): React.JSX.Element {
     setLoading(true)
     setLoadError(null)
     try {
-      const data = await window.api.getStudentsWithState(ctx.module_code, ctx.station_number)
+      const [data, progress] = await Promise.all([
+        window.api.getStudentsWithState(ctx.module_code, ctx.station_number),
+        examinerName ? window.api.getDashboardProgress(examinerName) : Promise.resolve(null)
+      ])
       setStudents(data)
+      if (progress) setDashboardProgress(progress)
     } catch (err) {
       setLoadError(String(err))
     } finally {
       setLoading(false)
     }
-  }, [ctx.module_code, ctx.station_number])
+  }, [ctx.module_code, ctx.station_number, examinerName, setDashboardProgress])
 
   useEffect(() => {
     load()
@@ -60,27 +73,109 @@ export default function StudentListPage(): React.JSX.Element {
     return acc
   }, {})
 
+  const currentModule = dashboardProgress.find((mod) => mod.module_code === ctx.module_code)
+  const stations = useMemo(
+    () => [...(currentModule?.stations ?? [])].sort((a, b) => a.station_number - b.station_number),
+    [currentModule?.stations]
+  )
+  const currentStationIndex = stations.findIndex((station) => station.station_number === ctx.station_number)
+  const currentStation = currentStationIndex >= 0 ? stations[currentStationIndex] : null
+  const previousStation = currentStationIndex > 0 ? stations[currentStationIndex - 1] : null
+  const nextStation = currentStationIndex >= 0 && currentStationIndex < stations.length - 1
+    ? stations[currentStationIndex + 1]
+    : null
+  const markedByMe = currentStation?.marked_by_me ?? 0
+  const stationTotal = currentStation?.total ?? students.length
+  const allMarkedByMe = stationTotal > 0 && markedByMe >= stationTotal
+
+  function stationContext(station: StationProgress): typeof ctx {
+    return {
+      module_code: ctx.module_code,
+      module_name: currentModule?.module_name ?? ctx.module_name,
+      station_number: station.station_number,
+      has_conclusion: station.form_fields?.some((field) => field.field_id.toUpperCase().includes('CONCLUSION')) ?? false,
+      conclusion_reference_text: station.conclusion_reference_text ?? null,
+      candidate_instructions: station.candidate_instructions ?? null,
+      form_fields: station.form_fields ?? []
+    }
+  }
+
+  function goToStation(station: StationProgress | null): void {
+    if (!station) return
+    setFilter('all')
+    setSearch('')
+    openStudentList(stationContext(station))
+  }
+
   return (
     <div className="min-h-screen bg-slate-100">
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setScreen('dashboard')}
-            className="text-slate-500 hover:text-slate-700 text-sm"
-          >
-            ← Dashboard
-          </button>
-          <span className="text-slate-300">|</span>
-          <span className="font-semibold text-slate-800">
-            {ctx.module_name} › Station {ctx.station_number}
-          </span>
+      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4 min-w-0 flex-wrap">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setScreen('dashboard')}
+              className="text-slate-500 hover:text-slate-700 text-sm"
+            >
+              ← Dashboard
+            </button>
+            <span className="text-slate-300">|</span>
+            <span className="font-semibold text-slate-800">
+              {ctx.module_name} › Station {ctx.station_number}
+            </span>
+          </div>
+          {stations.length > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => goToStation(previousStation)}
+                disabled={!previousStation}
+                className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white"
+              >
+                Previous station
+              </button>
+              <button
+                onClick={() => goToStation(nextStation)}
+                disabled={!nextStation}
+                className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white"
+              >
+                Next station
+              </button>
+            </div>
+          )}
         </div>
-        <span className="text-sm text-slate-500">
+        <span className="text-sm text-slate-500 whitespace-nowrap">
           Examiner: <strong className="text-slate-700">{examinerName}</strong>
         </span>
       </header>
 
       <main className="p-6 max-w-4xl mx-auto flex flex-col gap-4">
+        {allMarkedByMe && (
+          <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-green-800">
+                Station {ctx.station_number} complete
+              </p>
+              <p className="text-xs text-green-700">
+                {markedByMe} of {stationTotal} students marked by you.
+              </p>
+            </div>
+            {nextStation ? (
+              <button
+                onClick={() => goToStation(nextStation)}
+                className="px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 whitespace-nowrap"
+              >
+                Continue to Station {nextStation.station_number}
+              </button>
+            ) : (
+              <button
+                onClick={() => setScreen('dashboard')}
+                className="px-4 py-2 bg-white border border-green-200 text-green-700 text-sm font-semibold rounded-lg hover:bg-green-100 whitespace-nowrap"
+              >
+                Back to Dashboard
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Summary chips */}
         <div className="flex gap-2 flex-wrap">
           <button

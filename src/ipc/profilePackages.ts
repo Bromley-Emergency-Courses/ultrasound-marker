@@ -207,8 +207,8 @@ export function saveProfileConfig(db: Database.Database, cfg: ProfileConfig): Pr
     `)
     const insertStation = db.prepare(`
       INSERT INTO assessment_stations
-        (profile_id, module_code, station_number, label, candidate_instructions, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (profile_id, module_code, station_number, label, candidate_instructions, conclusion_reference_text, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     const insertField = db.prepare(`
       INSERT INTO station_form_fields
@@ -300,6 +300,7 @@ export function saveProfileConfig(db: Database.Database, cfg: ProfileConfig): Pr
           stationNumber,
           station.label || `Station ${stationNumber}`,
           station.candidate_instructions ?? null,
+          station.conclusion_reference_text?.trim() || null,
           stationIndex,
           ts,
           ts

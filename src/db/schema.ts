@@ -149,6 +149,7 @@ export function initSchema(db: Database.Database): void {
       station_number          INTEGER NOT NULL,
       label                   TEXT NOT NULL,
       candidate_instructions  TEXT,
+      conclusion_reference_text TEXT,
       sort_order              INTEGER NOT NULL DEFAULT 0,
       created_at              TEXT NOT NULL,
       updated_at              TEXT NOT NULL,
@@ -460,6 +461,12 @@ export function initSchema(db: Database.Database): void {
     // Column already exists — safe to ignore
   }
 
+  try {
+    db.exec(`ALTER TABLE assessment_stations ADD COLUMN conclusion_reference_text TEXT`)
+  } catch {
+    // Column already exists — safe to ignore
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS conclusion_dicom_links (
       profile_id            TEXT NOT NULL,
@@ -516,8 +523,8 @@ function seedLegacyProfile(db: Database.Database): void {
     `)
     const insertStation = db.prepare(`
       INSERT OR IGNORE INTO assessment_stations
-        (profile_id, module_code, station_number, label, candidate_instructions, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (profile_id, module_code, station_number, label, candidate_instructions, conclusion_reference_text, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     const insertField = db.prepare(`
       INSERT OR IGNORE INTO station_form_fields
@@ -535,6 +542,7 @@ function seedLegacyProfile(db: Database.Database): void {
           station.number,
           station.label,
           station.candidate_instructions ?? null,
+          station.conclusion_reference_text ?? null,
           stationIndex,
           now,
           now
