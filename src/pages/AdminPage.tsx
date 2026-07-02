@@ -1688,6 +1688,7 @@ function ProfilePanel(): React.JSX.Element {
       station_number: stationNumber,
       label: `Station ${stationNumber}`,
       candidate_instructions: '',
+      conclusion_reference_text: null,
       form_fields: orderStationFields(rubricFields.map(cloneRubricField))
     }
   }
@@ -1896,7 +1897,7 @@ function ProfilePanel(): React.JSX.Element {
     setStatus(`Station ${stationNumber} deletion staged for all modules. Save profile to apply.`)
   }
 
-  function updateStationField<K extends 'label' | 'candidate_instructions'>(key: K, value: string): void {
+  function updateStationField<K extends 'label' | 'candidate_instructions' | 'conclusion_reference_text'>(key: K, value: string): void {
     if (!cfg || !mod || !station) return
     update({
       ...cfg,
@@ -2607,6 +2608,15 @@ function ProfilePanel(): React.JSX.Element {
                     />
                     Requires conclusion form for {mod.code} Station {station.station_number}
                   </label>
+                  {stationHasConclusion(station) && (
+                    <textarea
+                      value={station.conclusion_reference_text ?? ''}
+                      onChange={(event) => updateStationField('conclusion_reference_text', event.target.value)}
+                      rows={5}
+                      placeholder="Model answer"
+                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  )}
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold uppercase text-slate-500">Universal rubric fields</span>
                     <button onClick={() => { setNewFieldType('score'); setNewFieldLabel(''); setError(null) }} className="text-xs text-blue-600 font-semibold">Add Score</button>

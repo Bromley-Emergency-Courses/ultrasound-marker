@@ -38,6 +38,7 @@ export interface StationProgress {
   station_number: number
   label: string
   candidate_instructions?: string | null
+  conclusion_reference_text?: string | null
   form_fields?: StationFormField[]
   marked_by_me: number
   resolved: number
@@ -79,6 +80,7 @@ export interface ProfileStation {
   station_number: number
   label: string
   candidate_instructions: string | null
+  conclusion_reference_text: string | null
   form_fields: StationFormField[]
 }
 

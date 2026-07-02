@@ -29,6 +29,7 @@ export interface ProfileStation {
   station_number: number
   label: string
   candidate_instructions: string | null
+  conclusion_reference_text: string | null
   form_fields: StationFormField[]
 }
 
@@ -179,7 +180,7 @@ export function getProfileModules(db: Database.Database, profileId = getActivePr
 
   const stations = db
     .prepare(
-      `SELECT module_code, station_number, label, candidate_instructions
+      `SELECT module_code, station_number, label, candidate_instructions, conclusion_reference_text
        FROM assessment_stations
        WHERE profile_id = ?
        ORDER BY sort_order, station_number`
@@ -946,7 +947,7 @@ export function getStationDefinition(
   const profileId = getActiveProfileId(db)
   const station = db
     .prepare(
-      `SELECT module_code, station_number, label, candidate_instructions
+      `SELECT module_code, station_number, label, candidate_instructions, conclusion_reference_text
        FROM assessment_stations
        WHERE profile_id = ? AND module_code = ? AND station_number = ?`
     )

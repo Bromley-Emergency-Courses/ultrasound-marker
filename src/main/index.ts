@@ -549,6 +549,7 @@ function registerIpcHandlers(): void {
           station_number: st.station_number,
           label: st.label,
           candidate_instructions: st.candidate_instructions,
+          conclusion_reference_text: st.conclusion_reference_text,
           form_fields: st.form_fields,
           marked_by_me: p.marked_by_me,
           resolved: p.resolved,
