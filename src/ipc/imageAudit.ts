@@ -18,7 +18,7 @@ interface ModuleConfig {
 
 export function runImageAudit(
   db: Database.Database,
-  targetRoot: string,
+  targetRoot: string | null,
   modulesConfig: ModuleConfig[]
 ): AuditEntry[] {
   const profileId = getActiveProfileId(db)
@@ -69,15 +69,17 @@ export function runImageAudit(
     if (!stations) continue
 
     for (const station of stations) {
-      const stationDir = join(
-        targetRoot,
-        student.student_id,
-        student.module_code,
-        'Practical',
-        `Station ${station.number}`
-      )
+      const stationDir = targetRoot
+        ? join(
+            targetRoot,
+            student.student_id,
+            student.module_code,
+            'Practical',
+            `Station ${station.number}`
+          )
+        : ''
 
-      const dirExists = existsSync(stationDir)
+      const dirExists = Boolean(targetRoot && existsSync(stationDir))
       let img1: string | null = null
       let img2: string | null = null
       let conclusion: string | null = null

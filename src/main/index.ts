@@ -799,7 +799,6 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('admin:auditImages', () => {
     const targetRoot = db ? getConfig(db, 'target_root') : null
-    if (!targetRoot) return []
     return runImageAudit(
       getDb(),
       targetRoot,
