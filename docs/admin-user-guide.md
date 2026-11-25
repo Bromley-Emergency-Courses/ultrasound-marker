@@ -442,6 +442,10 @@ If a file is missing, click the link action for:
 
 Choose the correct file. The app copies it into the correct student station folder.
 
+If a candidate image is incorrect, click `Replace file` beneath its filename in the IMG1 or IMG2 column and choose the correct image. The audit refreshes automatically. Cancelling the file picker keeps the existing image.
+
+If the station has a linked DICOM study, that study remains the active source for marking. To use the local images instead, unlink the study using the DICOM column.
+
 ### Manual DICOM linking
 
 If a station should use a DICOM study, click `Link DICOM`.
