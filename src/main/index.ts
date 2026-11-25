@@ -974,6 +974,7 @@ function registerIpcHandlers(): void {
             : `IMG2_${shortId}${ext}`
       const destPath = join(destDir, destName)
       try {
+        copyFileSync(srcPath, destPath)
         if (slot === 'img1' || slot === 'img2') {
           const slotPrefix = slot === 'img1' ? `img1_${shortId}` : `img2_${shortId}`
           for (const entry of readdirSync(destDir)) {
@@ -982,7 +983,6 @@ function registerIpcHandlers(): void {
             }
           }
         }
-        copyFileSync(srcPath, destPath)
         return { success: true, destPath }
       } catch (err) {
         return { success: false, reason: String(err) }

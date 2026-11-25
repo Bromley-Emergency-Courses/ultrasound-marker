@@ -74,27 +74,32 @@ function StatusBadge({ status }: { status: 'ok' | 'partial' | 'missing' }): Reac
 function SlotIndicator({
   value,
   label,
+  loading,
   onLink
 }: {
   value: string | null
   label: string
+  loading: boolean
   onLink: () => void
 }): React.JSX.Element {
   return (
-    <div className="flex items-center gap-1">
-      <span
-        className={`w-2 h-2 rounded-full flex-shrink-0 ${value ? 'bg-green-500' : 'bg-red-400'}`}
-      />
-      <span className="text-xs text-slate-600 truncate max-w-[120px]" title={value ?? undefined}>
-        {value ?? (
-          <button
-            onClick={onLink}
-            className="text-blue-600 hover:underline text-xs"
-          >
-            Link {label}
-          </button>
-        )}
-      </span>
+    <div className="flex flex-col items-start gap-1">
+      <div className="flex items-center gap-1">
+        <span
+          className={`w-2 h-2 rounded-full flex-shrink-0 ${value ? 'bg-green-500' : 'bg-red-400'}`}
+        />
+        <span className="text-xs text-slate-600 truncate max-w-[120px]" title={value ?? undefined}>
+          {value ?? 'Missing'}
+        </span>
+      </div>
+      <button
+        onClick={onLink}
+        disabled={loading}
+        title={`${value ? 'Replace' : 'Link'} ${label}`}
+        className="px-2 py-1 rounded border border-slate-300 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+      >
+        {loading ? 'Working...' : value ? 'Replace file' : `Link ${label}`}
+      </button>
     </div>
   )
 }
@@ -359,24 +364,28 @@ function AuditPanel(): React.JSX.Element {
       ? [{ name: 'Images & PDF', extensions: ['jpg', 'jpeg', 'tif', 'tiff', 'pdf'] }]
       : [{ name: 'Images', extensions: ['jpg', 'jpeg', 'tif', 'tiff'] }]
 
-    const filePath = await window.api.selectFile(exts)
-    if (!filePath) return
-
     setLinking({ entry, slot })
-    const result = await window.api.copyFileToStation(
-      filePath,
-      entry.student_id,
-      entry.module_code,
-      entry.station_number,
-      slot
-    )
+    try {
+      const filePath = await window.api.selectFile(exts)
+      if (!filePath) return
 
-    if (!result.success) {
-      setLinkError(`Failed to link file: ${result.reason}`)
+      const result = await window.api.copyFileToStation(
+        filePath,
+        entry.student_id,
+        entry.module_code,
+        entry.station_number,
+        slot
+      )
+
+      if (!result.success) {
+        setLinkError(`Failed to link file: ${result.reason}`)
+      }
+      await load()
+    } catch (err) {
+      setLinkError(`Failed to link file: ${String(err)}`)
+    } finally {
+      setLinking(null)
     }
-    setLinking(null)
-    // Refresh audit to reflect change
-    await load()
   }
 
   async function handleReferenceLink(entry: ReferenceAuditEntry, slot: 1 | 2): Promise<void> {
@@ -659,6 +668,7 @@ function AuditPanel(): React.JSX.Element {
                       <SlotIndicator
                         value={e.img1}
                         label="IMG1"
+                        loading={isLinking}
                         onLink={() => !isLinking && handleLink(e, 'img1')}
                       />
                     </td>
@@ -666,6 +676,7 @@ function AuditPanel(): React.JSX.Element {
                       <SlotIndicator
                         value={e.img2}
                         label="IMG2"
+                        loading={isLinking}
                         onLink={() => !isLinking && handleLink(e, 'img2')}
                       />
                     </td>

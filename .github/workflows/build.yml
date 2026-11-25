@@ -8,6 +8,16 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Candidate version, for example 11.0.6-rc.1
+        required: true
+        type: string
+      previous_release:
+        description: Released version to upgrade from on Windows
+        required: true
+        default: v11.0.5
+        type: string
 
 permissions:
   contents: write
@@ -25,6 +35,7 @@ jobs:
             platform: win
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
 
     steps:
       - name: Checkout code
@@ -49,9 +60,78 @@ jobs:
         shell: bash
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
 
+      - name: Set candidate version
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+        run: |
+          node -e 'if (!/^\d+\.\d+\.\d+-rc\.\d+$/.test(process.env.CANDIDATE_VERSION)) process.exit(1)'
+          npm version "$CANDIDATE_VERSION" --no-git-tag-version
+
       # GH_TOKEN lets electron-builder publish the built installers
       # directly to the GitHub Release created by this tag push.
       - name: Build and publish installer
+        if: github.event_name == 'push'
         run: npm run package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build candidate without publishing
+        if: github.event_name == 'workflow_dispatch'
+        run: npm run package -- --publish never
+
+      - name: Verify Windows installer upgrade
+        if: github.event_name == 'workflow_dispatch' && matrix.platform == 'win'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREVIOUS_RELEASE: ${{ inputs.previous_release }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $checkRoot = Join-Path $env:RUNNER_TEMP 'ultrasound-upgrade-check'
+          $installDir = Join-Path $checkRoot 'installed'
+          $previousDir = Join-Path $checkRoot 'previous'
+          $toolsDir = Join-Path $checkRoot 'tools'
+          $fixtureDir = Join-Path $checkRoot 'fixture'
+          New-Item -ItemType Directory -Force $previousDir | Out-Null
+          npm install --prefix $toolsDir --no-package-lock --ignore-scripts playwright-core@1.65.1
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install upgrade-check tools' }
+          $env:NODE_PATH = Join-Path $toolsDir 'node_modules'
+          gh release download $env:PREVIOUS_RELEASE --repo $env:GITHUB_REPOSITORY --pattern '*.exe' --dir $previousDir
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the previous installer' }
+          $previous = @(Get-ChildItem $previousDir -Filter '*.exe')
+          $candidate = @(Get-ChildItem dist -Filter '*.exe')
+          if ($previous.Count -ne 1 -or $candidate.Count -ne 1) { throw 'Expected one installer per version' }
+          function Install-ForCheck($installer) {
+            $process = Start-Process -FilePath $installer -ArgumentList '/S', "/D=$installDir" -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "Installer failed with exit code $($process.ExitCode)" }
+          }
+          Install-ForCheck $previous[0].FullName
+          $executable = Join-Path $installDir 'Ultrasound Marker.exe'
+          $previousVersion = $env:PREVIOUS_RELEASE.TrimStart('v')
+          node scripts/check-installer-upgrade.cjs before $executable $fixtureDir $previousVersion
+          if ($LASTEXITCODE -ne 0) { throw 'Previous-version fixture check failed' }
+          Install-ForCheck $candidate[0].FullName
+          node scripts/check-installer-upgrade.cjs after $executable $fixtureDir $env:CANDIDATE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate upgrade check failed' }
+
+      - name: Upload candidate installers
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.platform }}-${{ inputs.candidate_version }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+
+      - name: Upload Windows upgrade evidence
+        if: always() && github.event_name == 'workflow_dispatch' && matrix.platform == 'win'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-upgrade-evidence-${{ inputs.candidate_version }}
+          path: ${{ runner.temp }}/ultrasound-upgrade-check/fixture/results/
